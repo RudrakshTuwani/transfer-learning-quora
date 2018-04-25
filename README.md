@@ -1,4 +1,4 @@
-# Prediting duplicate question pairs on Quora using transfer learning.
+# Predicting duplicate question pairs on Quora using transfer learning.
 
 Performance of recently proposed tranfer learning techniques for Natural Language Processing (NLP) applications 
 ([FitLaM](https://arxiv.org/abs/1801.06146) and [USE](https://arxiv.org/abs/1803.11175))

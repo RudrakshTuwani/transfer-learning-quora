@@ -11,3 +11,7 @@ The effect on performance by varying dataset size is also investigated.
 | Model/Training Set Size | 100  | 1000  | 10000  | 50000  | 100000 | All |
 |---|---|---|---|---|---|---|
 | ArCos USE  |   |   |   | | |0.537 |
+
+# Help Needed!
+I'm completely packed with work at present and not able to work full time on this project. If you'd like to contribute to
+this repo, shoot me a mail at rudraksht at iiitd.ac.in

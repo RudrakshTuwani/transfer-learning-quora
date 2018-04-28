@@ -2,11 +2,34 @@ from sklearn.linear_model import LogisticRegressionCV
 from fastai.text import *
 
 
+def get_report(y_true, y_pred, y_prob):
+    acc = metrics.accuracy_score(y_true, y_pred)
+    nll = metrics.log_loss(y_true, y_prob)
+
+    print("Accuracy: ", acc)
+    print("Negative Log loss: ", nll)
+    print(metrics.classification_report(y_true, y_pred))
+    
+    return acc, nll
+
+
+def nn_evaluate(dl, model):
+    y_prob, y_true = list(), list()
+    for x,y in dl:
+        y_prob.append(to_np(model(to_gpu(Variable(x)))))
+        y_true.append(to_np(y))
+
+    y_prob, y_true = np.concatenate(y_prob), np.concatenate(y_true)
+    y_pred = y_prob > 0.5
+    
+    get_report(y_true, y_pred, y_prob)
+
+
 class ArCosModel(LogisticRegressionCV):
-    def __init__(self, trn, val, Cs=np.logspace(-5, 5, 20), cv=10, class_weight=None,
+    def __init__(self, md, Cs=np.logspace(-5, 5, 20), cv=10, class_weight=None,
                  random_state=None, n_jobs=-1, verbose=1, scoring='neg_log_loss', **args):
-        self.trn = trn
-        self.val = val
+        self.trn = md.trn_dl
+        self.val = md.val_dl
         super().__init__(Cs=Cs, cv=cv, class_weight=class_weight, random_state=random_state, 
                          n_jobs=n_jobs, verbose=verbose, scoring=scoring, **args)
         
@@ -61,10 +84,66 @@ class ArCosModel(LogisticRegressionCV):
         self.val_preds = super().predict(val_angular_distances)
         self.val_targets = val_targets
         
-        # Metrics
-        self.acc = metrics.accuracy_score(self.val_targets, self.val_preds)
-        self.nll = metrics.log_loss(self.val_targets, self.val_probs)
+        self.acc, self.nll = get_report(self.val_targets, self.val_preds, self.val_probs)
+        
+        
+class FullyConnectedNet(nn.Module):
+    def __init__(self, emb_sz, nhl, drops):
+        super().__init__()
+        
+        nhl.insert(0, emb_sz*2)
+        self.fcn = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(nhl[i-1], nhl[i]),
+                nn.ReLU(inplace=True),
+                 nn.BatchNorm1d(nhl[i]),
+                nn.Dropout(drops[i-1], inplace=True)
+            )
+            for i in range(1, len(nhl))])
+        self.out = nn.Linear(nhl[-1], 1)
+        
+    def forward(self, input):
+        bs = input.size()[0]
+        x = input.view(bs, -1)
+        for fc in self.fcn: 
+            x = fc(x)
 
-        print("Accuracy: ", self.acc)
-        print("Negative Log loss: ", self.nll)
-        print(metrics.classification_report(self.val_targets, self.val_preds))
+        out = F.sigmoid(self.out(x)).view(-1)
+        return out
+
+
+class EmbedQuestionNet(nn.Module):
+    def __init__(self, encoder):
+        super().__init__()
+        self.encoder = encoder
+
+    def pool(self, x, bs, is_max):
+        f = F.adaptive_max_pool1d if is_max else F.adaptive_avg_pool1d
+        return f(x.permute(1,2,0), (1,)).view(bs,-1)
+    
+    def forward_once(self, inp):
+        raw_outputs, outputs = self.encoder(inp)
+        output = outputs[-1]
+        sl, bs, _ = output.size()
+        avgpool = self.pool(output, bs, False)
+        mxpool = self.pool(output, bs, True)
+        x = torch.cat([output[-1], mxpool, avgpool], 1)
+        
+        return x
+    
+    def transform(self, dl):
+        q1, q2, targs = [], [], []
+
+        for i, ((x1, x2), y) in enumerate(dl):
+            q1.append(to_np(self.forward_once(Variable(x1.transpose(0, 1)))))
+            q2.append(to_np(self.forward_once(Variable(x2.transpose(0, 1)))))
+            targs.append(y)
+
+            if i % 1000 == 0:
+                print(f"Completed {i+1}/{len(dl)} batches.")
+        print(f"Completed all batches")
+
+        qnemb = np.concatenate([np.concatenate(q1)[None], np.concatenate(q2)[None]]).transpose(1, 0, 2)
+        targs = np.concatenate(targs)
+
+        return qnemb, targs

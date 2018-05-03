@@ -15,11 +15,11 @@ def get_report(y_true, y_pred, y_prob):
 
 def nn_evaluate(dl, model):
     y_prob, y_true = list(), list()
-    for x,y in dl:
-        y_prob.append(to_np(model(to_gpu(Variable(x)))))
+    for *x,y in dl:
+        y_prob.append(to_np(model((*V(x)))))
         y_true.append(to_np(y))
 
-    y_prob, y_true = np.concatenate(y_prob), np.concatenate(y_true)
+    y_prob, y_true = np.concatenate(y_prob).clip(0.01, 0.99), np.concatenate(y_true)
     y_pred = y_prob > 0.5
     
     get_report(y_true, y_pred, y_prob)
@@ -122,21 +122,22 @@ class EmbedQuestionNet(nn.Module):
         return f(x.permute(1,2,0), (1,)).view(bs,-1)
     
     def forward_once(self, inp):
+        self.encoder.reset()
         raw_outputs, outputs = self.encoder(inp)
         output = outputs[-1]
-        sl, bs, _ = output.size()
-        avgpool = self.pool(output, bs, False)
-        mxpool = self.pool(output, bs, True)
-        x = torch.cat([output[-1], mxpool, avgpool], 1)
-        
-        return x
-    
+#        sl, bs, _ = output.size()
+#        avgpool = self.pool(output, bs, False)
+#        mxpool = self.pool(output, bs, True)
+#        x = torch.cat([output[-1], mxpool, avgpool], 1)
+#        return x
+        return output[-1]
+
     def transform(self, dl):
         q1, q2, targs = [], [], []
 
-        for i, ((x1, x2), y) in enumerate(dl):
-            q1.append(to_np(self.forward_once(Variable(x1.transpose(0, 1)))))
-            q2.append(to_np(self.forward_once(Variable(x2.transpose(0, 1)))))
+        for i, (x1, x2, y) in enumerate(dl):
+            q1.append(to_np(self.forward_once(Variable(x1))))
+            q2.append(to_np(self.forward_once(Variable(x2))))
             targs.append(y)
 
             if i % 1000 == 0:
